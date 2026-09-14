@@ -64,3 +64,16 @@ python3 -m analysis.run       # 生成 results/report.md
 2. 先有机制再看数字。
 3. 指标必须盘中可得。"收盘距最低收回"只用于事后分类。
 4. 一次只用一个进场条件。
+
+## 每日定位
+
+```bash
+python3 -m analysis.today --date 2026-09-14 --open 101.74 --high 105.34 \
+    --low 99.87 --close 104.41 --qqq 711.96 --fomc 2026-09-16
+```
+
+盘中或收盘的一根 K 线喂进去，输出 `results/today_<date>.md`：长周期在哪一段的哪一天、短周期最像的历史 K 线、决议前后的条件统计，以及这几条线索互相矛盾的地方。
+
+## 数据边界
+
+SOXL 2010-03-11 上市，仓里已是全部历史。更长的半导体序列（SOX 指数、2000 和 2008 两次熊市）本会话拿不到：出口策略只放行 `raw.githubusercontent.com`，Yahoo / Stooq / FRED / Nasdaq / AlphaVantage 均返回 403。把 CSV 放进 `data/` 即可接入。
