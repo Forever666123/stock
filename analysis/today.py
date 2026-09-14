@@ -163,10 +163,30 @@ def main():
         print(f"| {nm} | {len(sub)} | {pct(sub.f20.mean())} / {pct(sub.f20.median())} / {(sub.f20>0).mean()*100:.0f}% "
               f"| {pct(sub.f60.mean())} / {pct(sub.f60.median())} / {(sub.f60>0).mean()*100:.0f}% | {pct(sub.min20.median())} |")
     print()
-    rt = hist[(hist.dd250 <= -0.5) & (hist.above_lo <= 0.20) & (hist.bars_since_lo >= 25)]
-    broke = (rt["min20"] < (rt["lo60"] / c[rt.index] - 1)).mean()
-    print(f"**关键一条**：深回撤中逼近一个 25 根以上的旧低点时（n={len(rt)}），20 个交易日内跌破那个低点的比例 **{broke*100:.0f}%**。")
-    print(f"对应现在：{lo_date.date()} 的 {lo:.2f} 大概率会被测试到甚至跌破。\n")
+    # Two different questions, two different measurements.
+    #   fill : does price trade down to the prior CLOSING low (a limit there fills)?
+    #   break: is a genuinely lower low established (intraday vs intraday)?
+    lowL = m["low"].rolling(60, min_periods=20).min()
+    fwdL = m["low"][::-1].rolling(20, min_periods=1).min()[::-1].shift(-1)
+    mask = (m.dd250 <= -0.5) & (m.above_lo <= 0.20) & (m.bars_since_lo >= 25) & (m.index < d)
+    rt = m[mask].index
+    fill = (fwdL[rt] <= m.loc[rt, "lo60"]).mean()
+    brk = (fwdL[rt] < lowL[rt]).mean()
+    ctl_mask = (m.above_lo <= 0.20) & (m.bars_since_lo >= 25) & (m.index < d)
+    ctl = (fwdL[m[ctl_mask].index] < lowL[m[ctl_mask].index]).mean()
+    base = (fwdL < lowL).mean()
+    events = int((pd.Series(rt).diff().dt.days > 12).cumsum().nunique())
+    print(f"**旧低点会不会被碰到**（n={len(rt)} 天，但只有 {events} 段独立行情）：\n")
+    print("| 问题 | 口径 | 20 交易日内发生率 |")
+    print("|---|---|---|")
+    print(f"| 挂在前低的限价单会成交吗 | 未来盘中最低 ≤ 前收盘低 | {fill*100:.0f}% |")
+    print(f"| 会真的跌破、创出新低吗 | 未来盘中最低 < 前盘中低 | {brk*100:.0f}% |")
+    print(f"| 对照：只逼近旧低，不要求深回撤 | 同上 | {ctl*100:.0f}% |")
+    print(f"| 对照：全样本无条件 | 同上 | {base*100:.0f}% |")
+    print()
+    print(f"所以：挂到 {lo:.2f} 大概率能成交（{fill*100:.0f}%），但真正意义上的破位只有 {brk*100:.0f}%，")
+    print(f"而且比\"随便什么时候逼近旧低\"的 {ctl*100:.0f}% 只高一点——\"深回撤\"这个条件几乎没加信息。")
+    print(f"分段看是 {events} 段里 4 段破、5 段没破，实际上就是 n=9，按你的规矩只能当反例用。\n")
 
     # ---------------- short term
     print("## 2. 短周期匹配：最像的历史 K 线\n")
@@ -234,13 +254,13 @@ def main():
     al = hist[(hist.ret <= -0.06) & (hist.qqq_ret > -0.02)]
     print(f"| 板块独跌大跌（今天的形态） | 看空 | {len(al)} | 2日 {pct(al.f2.mean())}，胜率 {(al.f2>0).mean()*100:.0f}%，最扎实 |")
     print(f"| FOMC D−2 大跌 | 看多 | {len(ad)} | 2日 {pct(ad.f2.mean())}，p={perm_p(ad['f2'], bd['f2']):.3f}，但 n={len(ad)} 且是我筛出来的 |")
-    print(f"| 深回撤逼近旧低 | 看空 | {len(rt)} | 20日内 {broke*100:.0f}% 跌破前低 |")
+    print(f"| 深回撤逼近旧低 | 中性偏空 | {events} 段 | 20日内 {brk*100:.0f}% 真破位，对照组 {ctl*100:.0f}%，几乎没有增量 |")
     print()
     print("按你自己的规矩：n<50 只能找反例。看多那条 n=9，而且是我试了十几个筛选条件之后挑出来的最好看的一个，")
     print("Bonferroni 之后 p 远不显著，并且它到 D+1 就失效（p=0.20）。它最多说明\"别在决议前做空\"，不是\"抄底\"。\n")
 
     print("## 5. 结论\n")
-    print(f"1. **今天不是底。** 判别底部的唯一硬指标是 {lo_date.date()} 的 {lo:.2f}，它还没被测试。历史上这种位置 {broke*100:.0f}% 会去测。")
+    print(f"1. **今天不是底。** 判别底部的唯一硬指标是 {lo_date.date()} 的 {lo:.2f}，它还没被测试。历史上这种位置 {fill*100:.0f}% 会被摸到，但只有 {brk*100:.0f}% 真正破位。")
     print("2. **明天（D−1）不追。** 板块独跌型跳空的次日胜率 50%，均值为负。")
     print(f"3. **要挂就挂到前低附近。** {lo:.2f} 对应今天收盘 {pct(lo/t.close-1)}。这是唯一有结构意义的价位，不是拍脑袋的百分比。")
     print("4. **决议是事件不是信号。** 看多的那条证据 n=9 且不稳，不足以让你提前进场；它唯一的用处是告诉你别在 D−1 追空。")
