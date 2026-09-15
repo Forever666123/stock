@@ -95,3 +95,9 @@ python -c "import yfinance as yf; d=yf.download(['SOXL','QQQ'], period='60d', in
 
 `python3 -m analysis.intraday` 给出低点出现在第几根、开盘半小时的预测力，以及
 2026-07-29 议息日的逐根走势。
+
+`data/intraday/peers_15m.csv` 是同期的 SOXX / SMH / NVDA / MU / AMD / SPY / VIXY
+15 分钟 K 线，用来检验半导体内部有没有领先关系。结论是没有：NVDA、MU、AMD 对
+SOXX 的领先相关性都在 ±0.05 以内，同步相关性 0.66–0.89；SOXL 对 SOXX 的日内
+跟踪相关性 0.9974、斜率 2.968，超额项标准差 0.156%，即 SOXL 就是 3 倍 SOXX，
+盯它和盯指数没有区别。
