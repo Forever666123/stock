@@ -50,12 +50,19 @@ _ROWS = [
 ]
 EMERGENCY = {"2020-03-03", "2020-03-15"}
 
-# 2026 scheduled statement days (Fed calendar). Actions unverified -> None.
+# 2026 scheduled statement days. Three actions are recovered from the CME
+# FedWatch meeting files in data/fedwatch/: a past meeting's distribution
+# collapses onto the bucket the Fed chose, and 04-29, 06-17 and 07-29 all
+# settle on 350-375, so those three were holds and the target range has not
+# moved since at least April. The rest are still unknown -> None, excluded.
 _ROWS_2026 = [
-    ("2026-01-28", None), ("2026-03-18", None), ("2026-04-29", None),
-    ("2026-06-17", None), ("2026-07-29", None), ("2026-09-16", None),
+    ("2026-01-28", None), ("2026-03-18", None), ("2026-04-29", 0),
+    ("2026-06-17", 0), ("2026-07-29", 0), ("2026-09-16", None),
     ("2026-10-28", None), ("2026-12-09", None),
 ]
+
+# Target range in bp as last confirmed by the FedWatch files (2026-07-29).
+CURRENT_TARGET_BP = (350, 375)
 
 # Meetings where a hike was a live option (rate-hiking cycles). Used for the
 # "does a pre-meeting selloff stop a hike" test. Judgement call, kept explicit.
