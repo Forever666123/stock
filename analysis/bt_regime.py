@@ -573,6 +573,80 @@ def part4f(m):
           f"{perm_p(hi['fwd1'].dropna().gt(0), lo['fwd1'].dropna().gt(0), lambda x,y: x.mean()-y.mean(), n=5000):.4f}")
 
 
+def part4g(m):
+    sec("4g. DECIDING WHICH VERSION TO BELIEVE: is rv20 conditioning ENOUGH?")
+    print("If the only thing different about 2026 is that volatility is high, then")
+    print("matching on observable trailing volatility should erase the 2026 effect.")
+    print("If 2026 is still worse AT THE SAME rv20, the calendar regime is real and")
+    print("no amount of conditioning on past volatility repairs the base rates.")
+    m = m.copy()
+    m["rv20"] = m["range"].rolling(20).median().shift(1)
+    cur = m["rv20"].iloc[-1]
+    print(f"\n  rv20 now = {pct(cur)};  percentile in 2010-2025 = "
+          f"{100*(m.loc[m.index<'2026-01-01','rv20']<cur).mean():.1f}%;  "
+          f"percentile within 2026 = "
+          f"{100*(m.loc[m.index>='2026-01-01','rv20']<cur).mean():.1f}%")
+    print("  i.e. by 2026's own standards today is a QUIET tape, by history's a loud one.")
+
+    bins = [0, .04, .05, .06, .075, .10, 1]
+    m["bucket"] = pd.cut(m["rv20"], bins)
+    m["fwd_rng20"] = m["range"][::-1].rolling(20, min_periods=1).median()[::-1].shift(-1)
+    print(f"\n{'rv20 bucket':<16}{'era':<12}{'n':>6}{'fwd20 median range':>20}"
+          f"{'fwd_min20 median':>19}{'next-day up':>13}")
+    for b, g in m.groupby("bucket", observed=True):
+        for era, gg in (("2010-2025", g[g.index < "2026-01-01"]),
+                        ("2026", g[g.index >= "2026-01-01"])):
+            if len(gg) == 0:
+                continue
+            flag = "" if len(gg) >= 50 else "   <- n<50, counter-example only"
+            print(f"{str(b):<16}{era:<12}{len(gg):>6}"
+                  f"{pct(gg['fwd_rng20'].median()):>20}"
+                  f"{pct(gg['fwd_min20'].median()):>19}"
+                  f"{gg['fwd1'].dropna().gt(0).mean()*100:>12.1f}%{flag}")
+
+    band = m[(m["rv20"] >= .055) & (m["rv20"] <= .065)]
+    ba = band[band.index < "2026-01-01"]
+    bb = band[band.index >= "2026-01-01"]
+    print(f"\nNarrow band rv20 in [5.5%, 6.5%] - today's actual state:")
+    print(f"  2010-2025 n={len(ba)}  fwd_min20 median {pct(ba['fwd_min20'].median())}  "
+          f"fwd20 realised median range {pct(ba['fwd_rng20'].median())}  "
+          f"next-day up {ba['fwd1'].dropna().gt(0).mean()*100:.1f}%")
+    print(f"  2026      n={len(bb)}  fwd_min20 median {pct(bb['fwd_min20'].median())}  "
+          f"fwd20 realised median range {pct(bb['fwd_rng20'].median())}  "
+          f"next-day up {bb['fwd1'].dropna().gt(0).mean()*100:.1f}%")
+    if len(bb) < 50:
+        print(f"  2026 n={len(bb)} < 50: this row is a counter-example, not a conclusion.")
+    if len(bb) >= 5 and len(ba) >= 5:
+        pa = perm_p(bb["fwd_min20"].dropna(), ba["fwd_min20"].dropna(),
+                    lambda x, y: np.median(x) - np.median(y), n=5000)
+        print(f"  perm p on fwd_min20 median difference = {pa:.4f} "
+              f"(overlapping windows; treat as an upper bound on evidence)")
+
+    print("\nPooling the low-rv20 buckets to clear n=50 for 2026 (rv20 <= 7.5%,")
+    print("i.e. every state at least as quiet as today plus a little above):")
+    q = m[m["rv20"] <= .075]
+    qa, qb = q[q.index < "2026-01-01"], q[q.index >= "2026-01-01"]
+    print(f"  {'':<12}{'n':>6}{'fwd20 med range':>18}{'fwd_min20 med':>16}"
+          f"{'next-day up':>13}{'fwd20 med':>11}")
+    for nm, g in (("2010-2025", qa), ("2026", qb)):
+        print(f"  {nm:<12}{len(g):>6}{pct(g['fwd_rng20'].median()):>18}"
+              f"{pct(g['fwd_min20'].median()):>16}"
+              f"{g['fwd1'].dropna().gt(0).mean()*100:>12.1f}%"
+              f"{pct(g['fwd20'].median()):>11}")
+    for col, lbl in (("fwd_rng20", "forward 20d median range"),
+                     ("fwd_min20", "forward 20d minimum")):
+        x, y = qb[col].dropna().values, qa[col].dropna().values
+        print(f"  {lbl}: perm p on medians = "
+              f"{perm_p(x, y, lambda u, v: np.median(u)-np.median(v), n=5000):.4f}"
+              f"   block(21) p = "
+              f"{block_perm_p(x, y, lambda u, v: np.median(u)-np.median(v), L=21, n=3000):.4f}")
+    print("  MECHANISM for why this can be real: rv20 is a 20-day MEDIAN of past")
+    print("  ranges. After a violent leg it decays as the calm days roll in, but the")
+    print("  event risk (FOMC, chip-specific headlines) that generated 2026's tails")
+    print("  has not decayed. So a quiet trailing window in 2026 is not the same")
+    print("  state as a quiet trailing window in 2013.")
+
+
 # ---------------------------------------------------------------- 5. speed
 
 
@@ -654,6 +728,7 @@ def main():
     part3(m)
     part4(m)
     part4f(m)
+    part4g(m)
     part5(m)
 
 
