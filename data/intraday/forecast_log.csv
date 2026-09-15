@@ -1,0 +1,13 @@
+# Live forecasts of the session low, made from the 15-minute record while the
+# session was running. bar is the 15-minute bar the forecast was made at (0 =
+# 09:30). low_so_far is what had printed at that moment; pred_median is the
+# conditional median of the final low; p_1005 is the probability the session
+# would reach 100.50. actual_low is the low as of the last report of the day.
+# First day of forecasts - one session is not validation, it is one observation.
+date,bar,time_et,low_so_far,pred_median,p_1005,corr_at_bar,actual_low,error
+2026-09-15,3,10:23,103.11,102.60,0.17,0.858,101.10,1.50
+2026-09-15,5,10:53,101.95,101.30,0.31,0.928,101.10,0.20
+2026-09-15,8,11:40,101.76,101.36,0.25,0.952,101.10,0.26
+2026-09-15,10,12:00,101.55,101.26,0.17,0.966,101.10,0.16
+2026-09-15,11,12:15,101.30,100.81,0.23,0.974,101.10,-0.29
+2026-09-15,12,12:30,101.10,100.79,0.25,0.979,101.10,-0.31
