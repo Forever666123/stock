@@ -79,21 +79,28 @@ def independent(dates, gap_days=20):
 
 
 # ------------------------------------------------------------- mechanics -----
-def tranche(c, low, n, i, off):
+GAP_FILL = False   # True -> a limit that gaps through fills at the OPEN, not the limit
+
+
+def tranche(c, low, n, i, off, op=None):
     """One tranche resting at c[i]*(1+off). Returns (ret, filled, fill_idx)."""
     px = c[i] * (1 + off)
     for j in range(i + 1, min(i + 1 + WINDOW, n)):
         if low[j] <= px:
-            return c[j + HOLD] / px - 1, True, j
+            fp = min(px, op[j]) if (GAP_FILL and op is not None) else px
+            return c[j + HOLD] / fp - 1, True, j
     return 0.0, False, -1
+
+
+OPENS = None
 
 
 def event_returns(c, low, n, idx, o1, o2):
     """Per-event half-and-half ladder return, plus fill flags."""
     out, f1, f2 = [], [], []
     for i in idx:
-        r1, a, _ = tranche(c, low, n, i, o1)
-        r2, b, _ = tranche(c, low, n, i, o2)
+        r1, a, _ = tranche(c, low, n, i, o1, OPENS)
+        r2, b, _ = tranche(c, low, n, i, o2, OPENS)
         out.append(0.5 * r1 + 0.5 * r2)
         f1.append(a); f2.append(b)
     return np.array(out), np.array(f1), np.array(f2)
@@ -109,6 +116,31 @@ def mae_of_fills(c, low, n, idx, o1, o2):
                 if low[j] <= px:
                     out.append(low[j:j + HOLD + 1].min() / px - 1)
                     break
+    return np.array(out)
+
+
+def portfolio_mae(c, low, n, idx, o1, o2):
+    """Worst mark of the WHOLE position (half in each tranche, unfilled half = cash)."""
+    out = []
+    for i in idx:
+        legs = []
+        for off in (o1, o2):
+            px = c[i] * (1 + off)
+            for j in range(i + 1, min(i + 1 + WINDOW, n)):
+                if low[j] <= px:
+                    legs.append((px, j, j + HOLD))
+                    break
+        if not legs:
+            continue
+        lo_, hi_ = min(f for _, f, _ in legs), max(e for _, _, e in legs)
+        worst = 0.0
+        for t in range(lo_, hi_ + 1):
+            v = 0.0
+            for px, f, e in legs:
+                if f <= t <= e:
+                    v += 0.5 * (low[t] / px - 1)
+            worst = min(worst, v)
+        out.append(worst)
     return np.array(out)
 
 
@@ -153,9 +185,33 @@ def perm_paired(a, b, nperm=NPERM):
 
 
 # ------------------------------------------------------------------ main -----
+def episode_ids(dates_arr, idx, gap_days=20):
+    """Group signal rows into episodes separated by more than ~gap_days trading days."""
+    ids, k = [], 0
+    prev = None
+    for i in idx:
+        d = pd.Timestamp(dates_arr[i])
+        if prev is not None and (d - prev).days > gap_days * 1.6:
+            k += 1
+        ids.append(k); prev = d
+    return np.array(ids)
+
+
+def block_perm(v, ids, nperm=NPERM):
+    """Mean over EPISODE means, with a sign-flip permutation at the episode level.
+    This is the honest n: overlapping signals inside one selloff are one observation."""
+    ep = np.array([v[ids == k].mean() for k in np.unique(ids)])
+    obs = ep.mean()
+    cnt = sum(1 for _ in range(nperm)
+              if abs((ep * RNG.choice([-1.0, 1.0], size=len(ep))).mean()) >= abs(obs))
+    return obs, (cnt + 1) / (nperm + 1), len(ep)
+
+
 def main():
+    global OPENS
     m = frame()
     c, low, op, n = m["close"].values, m["low"].values, m["open"].values, len(m)
+    OPENS = op
     dates = m["date"].values
     sigs = signals(m)
 
@@ -230,6 +286,22 @@ def main():
               f"fill {p1.mean()*100:.0f}%/{p2.mean()*100:.0f}%")
         print(f"      OVERFIT GAP  IS mean {best[2]*100:+.2f}%  ->  OOS mean {vo.mean()*100:+.2f}%  "
               f"= {(vo.mean()-best[2])*100:+.2f} pp")
+        # Did the SELECTION transfer, or only the period differ? Rank the IS-winner OOS.
+        oos_grid = {}
+        for a_i, g1 in enumerate(GRID):
+            for g2 in GRID[a_i + 1:]:
+                vv, _, _ = event_returns(c, low, n, oos, g1, g2)
+                oos_grid[(g1, g2)] = vv.mean()
+        ov = np.array(list(oos_grid.values()))
+        r_best = 1 + sum(1 for x in ov if x > oos_grid[(o1, o2)])
+        r_prop = 1 + sum(1 for x in ov if x > oos_grid[PROPOSED])
+        se = vo.std(ddof=1) / np.sqrt(len(vo))
+        print(f"      SELECTION TRANSFER: IS-winner ranks {r_best}/{len(ov)} out of sample "
+              f"(random would average {len(ov)/2:.0f}); OOS grid best "
+              f"{max(ov)*100:+.2f}% median {np.median(ov)*100:+.2f}% worst {min(ov)*100:+.2f}%")
+        print(f"      proposed -5/-9 ranks {r_prop}/{len(ov)} out of sample.  "
+              f"OOS s.e. of the mean = {se*100:.2f}pp -> the whole OOS grid spans "
+              f"{(max(ov)-min(ov))/se:.2f} s.e.")
 
     # ---- benchmarks
     print("\n[4] BENCHMARKS on the SAME events (full position, same 20d hold)")
@@ -319,10 +391,22 @@ def main():
         print(f"    neighbourhood of the peak   (+-1 step, n={len(nk)}): "
               f"min {nk.min()*100:+.2f}% max {nk.max()*100:+.2f}% "
               f"range {(nk.max()-nk.min())*100:.2f}pp")
-        frac = (vals >= surf[peak] - 0.2 * abs(spread)).mean()
-        shape = "BROAD PLATEAU" if frac > 0.30 else ("SHARP PEAK" if frac < 0.10 else "INTERMEDIATE")
-        print(f"    {frac*100:.0f}% of grid pairs are within 20% of the peak-to-trough spread "
-              f"of the peak -> {shape}")
+        vref, _, _ = event_returns(c, low, n, idx, *PROPOSED)
+        se = vref.std(ddof=1) / np.sqrt(len(vref))
+        print(f"    s.e. of the mean at -5/-9 = {se*100:.2f}pp. "
+              f"Whole-grid spread = {spread/se:.2f} s.e.; peak minus -5/-9 = "
+              f"{(surf[peak]-prop)/se:.2f} s.e.")
+        shape = ("BROAD PLATEAU - the grid cannot distinguish its own cells"
+                 if spread < 1.0 * se else
+                 ("SHAPED but within noise" if spread < 2.0 * se else
+                  "REAL STRUCTURE across the grid"))
+        print(f"    -> {shape}")
+        onstep = np.array([surf[q] for q in surf
+                           if abs(q[0] - PROPOSED[0]) <= 0.0101 and abs(q[1] - PROPOSED[1]) <= 0.0101])
+        print(f"    is -5/-9 on a plateau? its +-1-step neighbourhood spans "
+              f"{(onstep.max()-onstep.min())/se:.2f} s.e. and sits "
+              f"{(prop-np.median(vals))/se:+.2f} s.e. from the grid median -> "
+              f"{'YES, indistinguishable from its neighbours' if (onstep.max()-onstep.min()) < se else 'neighbourhood itself is not flat'}")
 
     # ---- outlier audit + drawdown tolerance
     print("\n[7] ADVERSARIAL AUDIT")
@@ -349,6 +433,59 @@ def main():
         print(f"  {name:<32} filled tranches n={len(mae)}  MAE median {np.median(mae)*100:.1f}%  "
               f"5th pct {np.percentile(mae,5)*100:.1f}%  worst {mae.min()*100:.1f}%  "
               f"share breaching -25% {(mae <= -0.25).mean()*100:.0f}%")
+
+    print("\n[7b] PORTFOLIO-LEVEL DRAWDOWN (half in each tranche; unfilled half is cash)")
+    print("     The plan is 'sized to tolerate -25%'. This is what the position actually saw.")
+    for name in sigs:
+        for per in ("IS", "OOS", "ALL"):
+            idx = IDX[name]["ins" if per == "IS" else "oos" if per == "OOS" else "all"]
+            if not idx:
+                continue
+            pm = portfolio_mae(c, low, n, idx, *PROPOSED)
+            if len(pm) == 0:
+                continue
+            print(f"  {name:<32} {per:<4} n={len(pm):>3}  median {np.median(pm)*100:6.1f}%  "
+                  f"5th pct {np.percentile(pm,5)*100:6.1f}%  worst {pm.min()*100:6.1f}%  "
+                  f"breached -25%: {(pm <= -0.25).mean()*100:3.0f}%")
+
+    print("\n[7c] UNCONDITIONAL BASELINE (every day, no signal at all)")
+    allidx = list(range(n - WINDOW - HOLD - 1))
+    bh = np.array([c[i + HOLD] / c[i] - 1 for i in allidx])
+    lad, _, _ = event_returns(c, low, n, allidx, *PROPOSED)
+    print(f"  buy-and-hold 20d any day : mean {bh.mean()*100:+.2f}%  median {np.median(bh)*100:+.2f}%  "
+          f"win {(bh>0).mean()*100:.0f}%  n={len(bh)}")
+    print(f"  ladder -5/-9 any day     : mean {lad.mean()*100:+.2f}%  median {np.median(lad)*100:+.2f}%  "
+          f"win {(lad>0).mean()*100:.0f}%  n={len(lad)}")
+    print("  Any signal EV must clear these, not zero.")
+
+    print("\n[7d] THE HONEST n: EPISODE-LEVEL TEST (overlapping signals inside one selloff = 1 obs)")
+    print("     mean of episode means, sign-flip permutation across episodes, two-sided vs 0,")
+    print("     and the same for ladder minus buy-at-close.")
+    for name in sigs:
+        for per in ("OOS", "ALL"):
+            idx = IDX[name]["oos" if per == "OOS" else "all"]
+            if not idx:
+                continue
+            ids = episode_ids(dates, idx)
+            v, _, _ = event_returns(c, low, n, idx, *PROPOSED)
+            bc = np.array([c[i + HOLD] / c[i] - 1 for i in idx])
+            m1, p1, ne = block_perm(v, ids)
+            m2, p2, _ = block_perm(v - bc, ids)
+            print(f"  {name:<32} {per:<4} episodes={ne:<3} ladder {m1*100:+6.2f}% p={p1:.3f}   "
+                  f"ladder-minus-close {m2*100:+6.2f}% p={p2:.3f}")
+    print("  Every episode count here is far below 50: these can only be counter-examples.")
+
+    print("\n[7e] FILL REALISM: limit price vs open price when the market gaps through the limit")
+    global GAP_FILL
+    for flag, lbl in ((False, "fill at the limit (as modelled above)"),
+                      (True, "fill at the open when it gaps through (more realistic)")):
+        GAP_FILL = flag
+        row = []
+        for name in sigs:
+            v, _, _ = event_returns(c, low, n, IDX[name]["all"], *PROPOSED)
+            row.append(f"{name.split()[0]} {v.mean()*100:+.2f}%/med {np.median(v)*100:+.2f}%")
+        print(f"  {lbl:<52} " + "  ".join(row))
+    GAP_FILL = False
 
     print("\n[8] MULTIPLE-TESTING BOOKKEEPING")
     npairs = sum(1 for a_i, _ in enumerate(GRID) for _ in GRID[a_i + 1:])
