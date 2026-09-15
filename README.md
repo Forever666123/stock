@@ -82,3 +82,16 @@ SOXL 2010-03-11 上市，仓里已是全部历史。更长的半导体序列（S
 
 - `data/SOXL_OHLC.csv` 中 2026-07-31 的收盘价与 2026-07-30 完全相同（114.720001），而该日内振幅达 12%。上游数据源的问题，暂未修正，用到该日的统计需留意。
 - SOXX 指数数据始于 2018-01-03，2010–2017 无法用它做交叉校验；`holdings_prices_1y.json` 止于 2026-09-11，2026-09-14 那根最极端的 K 线没有对指数校验过。
+
+## 盘中数据
+
+`data/intraday/SOXL_QQQ_15m.csv` 是 yfinance 导出的 15 分钟 K 线（SOXL 与 QQQ，
+2026-06-22 至 2026-09-15，1537 根），起点正好是本轮高点当天，完整覆盖整段回撤。
+Yahoo 的 15 分钟只保留最近 60 天，要续期就重新导出：
+
+```powershell
+python -c "import yfinance as yf; d=yf.download(['SOXL','QQQ'], period='60d', interval='15m', group_by='ticker', auto_adjust=False); d.to_csv('SOXL_QQQ_15m.csv')"
+```
+
+`python3 -m analysis.intraday` 给出低点出现在第几根、开盘半小时的预测力，以及
+2026-07-29 议息日的逐根走势。
