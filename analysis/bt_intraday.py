@@ -111,7 +111,8 @@ def fomc_dm1(m: pd.DataFrame) -> pd.Index:
 
 # ----------------------------------------------------------------- stats
 
-TESTS: list[tuple[str, float]] = []
+TESTS: list[tuple[str, float]] = []   # confirmatory family
+DIAG: list[tuple[str, float]] = []    # robustness diagnostics, corrected separately
 
 
 def perm_p(a, b, stat="median", n=NPERM) -> float:
@@ -293,6 +294,55 @@ def main():
     print(f"共 {len(nofill)} 天，占 {len(nofill)/len(dd.dropna(subset=['low_ret']))*100:.1f}%；"
           f"其中最近几次 {', '.join(str(i.date()) for i in nofill.index[-5:])}\n")
 
+    # ---- 4b. adversarial attack on whatever survived
+    print("## 4b. 对唯一一条存活结果的攻击\n")
+    print("全样本 low@close 的 5 日中位收益明显高于 low@mid。下面四种方式拆它。\n")
+    lc = allm[allm["cls"] == "low@close"]
+    lm = allm[allm["cls"] == "low@mid"]
+    print("**(a) 分时期**（如果只来自某一两段行情，就不是规律）：\n")
+    print("| 区间 | low@close n | 5日中位 | low@mid 5日中位 | 差 |")
+    print("|---|---|---|---|---|")
+    for a, b in [("2010","2014"),("2015","2019"),("2020","2022"),("2023","2026")]:
+        A = lc[(lc.index.year>=int(a))&(lc.index.year<=int(b))]["fwd5"].dropna()
+        B = lm[(lm.index.year>=int(a))&(lm.index.year<=int(b))]["fwd5"].dropna()
+        f = " ⚠n<50" if len(A) < SMALL_N else ""
+        print(f"| {a}-{b}{f} | {len(A)} | {A.median()*100:+.2f}% | {B.median()*100:+.2f}% "
+              f"| {(A.median()-B.median())*100:+.2f}pp |")
+    print("\n每一段的 n 都 <50，逐段只能当反例看。\n")
+
+    print("**(b) 留一年法**（逐年剔除后中位差还剩多少）：\n")
+    base_d = (lc["fwd5"].median() - lm["fwd5"].median()) * 100
+    rows = []
+    for y in sorted(set(lc.index.year)):
+        A = lc[lc.index.year != y]["fwd5"].dropna()
+        B = lm[lm.index.year != y]["fwd5"].dropna()
+        rows.append((y, (A.median()-B.median())*100, (lc.index.year==y).sum()))
+    rows.sort(key=lambda r: r[1])
+    print(f"完整样本中位差 = {base_d:+.2f}pp；留一年后区间 "
+          f"[{rows[0][1]:+.2f}, {rows[-1][1]:+.2f}]pp；"
+          f"影响最大的一年是 {rows[0][0]}（剔掉后降到 {rows[0][1]:+.2f}pp，该年 {rows[0][2]} 个样本）。\n")
+
+    print("**(c) 同跌幅对照组**（把 low@close 换成'跌得一样多但低点在盘中'的日子）：\n")
+    lo_q, hi_q = lc["ret"].quantile(0.1), lc["ret"].quantile(0.9)
+    matched = lm[lm["ret"].between(lo_q, hi_q)]
+    pm_match = perm_p(lc["fwd5"], matched["fwd5"], "median")
+    pa_match = perm_p(lc["fwd5"], matched["fwd5"], "mean")
+    DIAG.append(("同跌幅对照|low@close|fwd5|median", pm_match))
+    DIAG.append(("同跌幅对照|low@close|fwd5|mean", pa_match))
+    print(f"| 组 | n | 当日收益中位 | 5日均值 | 5日中位 |")
+    print("|---|---|---|---|---|")
+    for nm, d in (("low@close", lc), (f"low@mid 且当日收益∈[{lo_q*100:.1f}%,{hi_q*100:.1f}%]", matched)):
+        x = d["fwd5"].dropna()
+        print(f"| {nm} | {len(x)} | {d['ret'].median()*100:+.2f}% | {x.mean()*100:+.2f}% | {x.median()*100:+.2f}% |")
+    print(f"\n对同跌幅组：中位 p={pm_match:.3f}，均值 p={pa_match:.3f}。\n")
+
+    print("**(d) 中位差的自助法区间**：\n")
+    A = lc["fwd5"].dropna().values; B = lm["fwd5"].dropna().values
+    bs = np.array([np.median(RNG.choice(A, len(A))) - np.median(RNG.choice(B, len(B)))
+                   for _ in range(5000)]) * 100
+    print(f"5000 次 bootstrap：中位差 {np.percentile(bs,2.5):+.2f} ~ {np.percentile(bs,97.5):+.2f}pp "
+          f"（点估计 {base_d:+.2f}pp），含 0 = {'是' if np.percentile(bs,2.5)<0<np.percentile(bs,97.5) else '否'}。\n")
+
     # ---- 5. multiple testing
     adj = holm(TESTS)
     sig = [(l, p, a) for (l, p), a in zip(TESTS, adj) if a < 0.05]
@@ -309,6 +359,14 @@ def main():
         print()
     raw_sig = [(l, p) for l, p in TESTS if p < 0.05]
     print(f"未校正 p<0.05 的有 {len(raw_sig)} 条，随机预期 {0.05*len(TESTS):.1f} 条。\n")
+    print(f"另有 {len(DIAG)} 个稳健性诊断检验（4b 节），未计入上面的校正族：")
+    for l, p in DIAG:
+        print(f"  - {l}: p={p:.3f}")
+    both = TESTS + DIAG
+    adj2 = holm(both)
+    sig2 = [(l, p, a) for (l, p), a in zip(both, adj2) if a < 0.05]
+    print(f"\n若把它们并入同一族（共 {len(both)} 个检验），Holm 后 p<0.05 的是："
+          f"{'、'.join(l for l,_,_ in sig2) if sig2 else '一个都没有'}。\n")
 
     # ---- 6. today
     print("## 7. 今天\n")
@@ -319,6 +377,32 @@ def main():
     print("所以 9/14 的低点落在盘中，日线无法告诉我们是几点。\n")
     print("**不能说的话：** '低点通常出现在十点'、'尾盘才是买点'、'开盘半小时最凶'——")
     print("这些陈述在本数据集上全部不可检验。要回答它们需要分钟级数据，此处没有。\n")
+
+    print("## 8. 结论\n")
+    print("1. **日线只能把日子分成三类，其中两类有时刻信息，第三类没有。** 全样本 86.7% 的日子")
+    print("   属于第三类（low@mid），对这些日子日线关于低点时刻的信息量是零。而且这个比例还在上升：")
+    print("   2010-2014 是 83.2%，2023-2026 是 91.5%。越晚的数据，能说的越少。\n")
+    print("2. **'开盘就是低点所以是好事'在全样本上依然被否定。** n=375（不是小样本），")
+    print("   1日 +0.26% vs 对照 +0.41%（p=0.588），5日 +1.97% vs +1.49%（p=0.531），")
+    print("   扣掉当日涨跌后 5日残差 +0.92%（p=0.108，Holm 后不显著）。")
+    print("   **用户先前在小样本上做出的否定，在全样本上成立。**\n")
+    print("3. **唯一一条挺过 Holm 的是 low@close（收在最低）之后 5 日的中位收益**：")
+    print("   +4.68% vs +1.49%，原始 p=0.001，46 个检验 Holm 后 p=0.046。它挺过了留一年法")
+    print("   （+2.91~+4.15pp）、四个时期符号一致、同跌幅对照组（p=0.008）、自助法区间不含 0。")
+    print("   但是——**三条限制让它不能当结论用**：")
+    print("   (i) 这是中位数/胜率的位移，不是期望的位移：均值差 p=0.070，同跌幅对照下 p=0.174。")
+    print("   (ii) 我没有在看到数字之前给出'收在最低→5日反弹'的机制。按本项目的证据规则，")
+    print("        事后补机制不算。它是一个未预设机制的残留异常，不是一条可用的规律。")
+    print("   (iii) 它与眼下的决策无关：它说的是'在收盘价买入收在最低的那一天'，")
+    print("        而计划是在前收之下挂限价单。而且horizon 是 5 日，计划持有 20 日。\n")
+    print("4. **FOMC D-1 在成交概率上不是特殊的一天。** 低点跌破前收 76.7%，全样本 76.0%；")
+    print("   跌破 −5% 25.6% vs 25.7%；low_ret 中位 −2.67% vs −2.34%（p=0.474）。")
+    print("   换句话说：挂在前收之下的单子，在 D-1 大约每四次有一次完全不成交，")
+    print("   这个概率跟随便挑一天没有区别。\n")
+    print("5. 若今天平开（隔夜指示 ~101.5，几乎就是前收），全样本平开日有 89.0% 会跌破前收，")
+    print("   14.3% 会跌破 −5%（对应 ~96.1），3.0% 会跌破 −9%（对应 ~92.0）。")
+    print("   FOMC D-1 且平开只有 27 个样本，⚠n<50，只能当反例：其中 96.3% 跌破前收，")
+    print("   11.1% 跌破 −5%，0% 跌破 −9%。这 27 个样本不能支撑任何结论。\n")
 
 
 if __name__ == "__main__":

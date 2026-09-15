@@ -238,11 +238,12 @@ def main():
         idx[k] = ii
         yrs = sorted({dates[i][:4] for i in ii})
         print(f"| {k} | {len(ii)} | {episodes(ii)} | {yrs[0]}-{yrs[-1]} |")
-    print("\nn<50 RULE: 'gap <= -12%' has n=22 over 11 episodes. Every number in that")
-    print("column is a COUNTER-EXAMPLE, never a conclusion. Its p1 IS its worst")
-    print("observation (1% of 22 is 0.2 observations). The other two columns are")
-    print("n>=50 by day count but only 33 and 17 by episode -- treat their p1/p99 the")
-    print("same way.")
+    ng = len(idx["gap <= -12%"]); eg = episodes(idx["gap <= -12%"])
+    print(f"\nn<50 RULE: 'gap <= -12%' has n={ng} over {eg} episodes. Every number in")
+    print("that column is a COUNTER-EXAMPLE, never a conclusion. Its p1 IS its worst")
+    print(f"observation (1% of {ng} is {ng/100:.2f} observations, so numpy is interpolating")
+    print("between the two worst days). The other two columns clear n=50 by day count")
+    print(f"but only {episodes(idx['day <= -13%'])} and {episodes(idx['deep dd (dd250<=-55% & 20d<=-25%)'])} by episode -- treat their p1/p99 the same way.")
 
     # ---------------------------------------------------------- 1. the price path
     print("\n" + "=" * 96)
@@ -321,29 +322,48 @@ def main():
     # ------------------------------------------- 3. price translation of p1 / p5
     print("\n" + "=" * 96)
     print("### 3. THE 1st AND 5th PERCENTILE AS AN ACTUAL SOXL PRICE")
-    print(f"Assumed entry prices: (1) next open {NEXT_OPEN_IND:.2f} (overnight indication);")
-    print("(2) fills at 96.00 and 92.00 (average 94.00 when both fill);")
-    print("(3) D0 close is unknown ex-ante, so its price column uses the p1/p5 of the")
-    print("    close[i+2] distribution as the entry and compounds from there.")
+    print("Each action has a different entry price, so each gets its own anchor:")
+    print(f"  (1) open    entry = {NEXT_OPEN_IND:.2f}  (the overnight indication, ~flat to 101.13)")
+    print("  (2) ladder  entry = 94.00 (average of the 96 and 92 fills); the percentiles")
+    print("              used here are the DEPLOYED-capital ones, i.e. conditional on")
+    print("              something having filled -- an account-level number cannot be")
+    print("              turned into a price because part of it is cash.")
+    print("  (3) D0close entry = the median D0 close in this population, printed per block,")
+    print("              because that price is not knowable until Wednesday afternoon.")
+    print("Low touched = entry x (1 + MAE percentile): the price that would print on the")
+    print("tape at that percentile, which is the number a liquidation engine reads.")
     print("=" * 96)
     for k, ii in idx.items():
+        jj = [i for i in ii if i + 2 < n]
+        d0_med = REF_CLOSE * (1 + float(np.median([c[i + 2] / c[i] - 1 for i in jj])))
+        d0_p5 = REF_CLOSE * (1 + float(np.percentile([c[i + 2] / c[i] - 1 for i in jj], 5)))
         print(f"\n-- {k}")
-        print("| action | h | p1 P&L | p1 exit price | p5 P&L | p5 exit price | p1 MAE | p1 low touched |")
-        print("|---|---|---|---|---|---|---|---|")
+        print(f"   D0 close in this population: median {d0_med:.2f}, 5th pct {d0_p5:.2f} "
+              f"(from 101.13, two sessions out)")
+        print("| action | entry px | h | p1 P&L | p1 exit px | p5 P&L | p5 exit px | "
+              "p1 MAE | p1 low touched | p5 MAE | p5 low touched |")
+        print("|---|---|---|---|---|---|---|---|---|---|---|")
         for h in HORIZONS:
             rows = store[(k, h)]
             for aname, v in rows.items():
-                q = np.percentile(v["ret"], [1, 5]); qm = np.percentile(v["mae"], [1])
                 if aname == "(1) open":
-                    base = NEXT_OPEN_IND
+                    base, rr = NEXT_OPEN_IND, v["ret"]
+                    mm = v["mae"]
                 elif aname == "(2) ladder":
-                    base = float(np.nanmean([r["entry"] for _, r in v["res"]]))
+                    base = float(np.mean(LADDER))
+                    rr = np.array([r["ret_deployed"] for _, r in v["res"]], float)
+                    rr = rr[~np.isnan(rr)]
+                    mm = np.array([r["mae"] / r["deployed"] for _, r in v["res"]
+                                   if r["deployed"] > 0], float)
                 else:
-                    jj = [i for i in ii if i + 2 < n]
-                    base = REF_CLOSE * (1 + np.percentile([c[i + 2] / c[i] - 1 for i in jj], 5))
-                print(f"| {aname} | {h} | {q[0]*100:+.1f}% | {base*(1+q[0]):.2f} | "
-                      f"{q[1]*100:+.1f}% | {base*(1+q[1]):.2f} | {qm[0]*100:+.1f}% | "
-                      f"{base*(1+qm[0]):.2f} |")
+                    base, rr, mm = d0_med, v["ret"], v["mae"]
+                q = np.percentile(rr, [1, 5]); qm = np.percentile(mm, [1, 5])
+                print(f"| {aname} | {base:.2f} | {h} | {q[0]*100:+.1f}% | {base*(1+q[0]):.2f} | "
+                      f"{q[1]*100:+.1f}% | {base*(1+q[1]):.2f} | "
+                      f"{qm[0]*100:+.1f}% | {base*(1+qm[0]):.2f} | "
+                      f"{qm[1]*100:+.1f}% | {base*(1+qm[1]):.2f} |")
+        print("   Note: the ladder's MAE here is also rescaled to deployed capital, so it")
+        print("   is NOT the account drawdown -- section 5 uses the account version.")
 
     # ----------------------------------------------- 4. the narrow next-day question
     print("\n" + "=" * 96)
@@ -485,6 +505,69 @@ def main():
         print(f"| {dt} | {act:+.0f} | {kind} | {pre*100:+.1f}% | {dd*100:.0f}% | "
               + " | ".join(cells) + f" | {ml} |")
     print("\nThis set is far below n=50. It is a list of counter-examples, not a base rate.")
+
+    # ------------------------------------------ 8. adversarial checks on my own tails
+    print("\n" + "=" * 96)
+    print("### 8. ADVERSARIAL CHECKS ON THE NUMBERS ABOVE")
+    print("=" * 96)
+
+    print("\n8a. Gap-through fills. The ladder model above fills AT 96 / AT 92 whenever the")
+    print("    low touches them. A resting BUY limit that gaps through fills at the OPEN,")
+    print("    which is better than the limit, so the model is conservative on entry price.")
+    print("    Refilling at min(limit, open) changes the h=20 account P&L by:")
+    print("| population | naive p5 | gap-through p5 | naive median | gap-through median | naive worst | gap-through worst |")
+    print("|---|---|---|---|---|---|---|")
+
+    def ladder_gt(i, h):
+        offs = [q / REF_CLOSE - 1 for q in LADDER]
+        w = 1.0 / len(offs); rets = []
+        for off in offs:
+            lim = c[i] * (1 + off)
+            j = next((k for k in range(i + 1, min(i + 1 + WINDOW, n)) if lo[k] <= lim), None)
+            if j is None:
+                rets.append(0.0); continue
+            px = min(lim, o[j])           # gap-through improves a buy limit
+            e = j + h - 1
+            if e >= n:
+                return None
+            rets.append(c[e] / px - 1)
+        return float(np.sum([w * r for r in rets]))
+
+    for k, ii in idx.items():
+        a = np.array([r["ret"] for _, r in store[(k, 20)]["(2) ladder"]["res"]])
+        b = np.array([x for x in (ladder_gt(i, 20) for i in ii) if x is not None])
+        print(f"| {k} | {np.percentile(a,5)*100:+.1f}% | {np.percentile(b,5)*100:+.1f}% | "
+              f"{np.median(a)*100:+.1f}% | {np.median(b)*100:+.1f}% | "
+              f"{a.min()*100:+.1f}% | {b.min()*100:+.1f}% |")
+
+    print("\n8b. Which episodes supply the left tail? If the p1/p5 comes from one crash,")
+    print("    it is one observation wearing a percentile's clothes. Worst 8 h=20 open-entry")
+    print("    outcomes and their dates, then p5 recomputed with each year dropped.")
+    for k, ii in idx.items():
+        rows = store[(k, 20)]["(1) open"]
+        rr, dd = rows["ret"], np.array(rows["dates"])
+        ordr = np.argsort(rr)[:8]
+        print(f"\n   -- {k}")
+        print("      worst 8: " + ", ".join(f"{dd[t]} {rr[t]*100:+.0f}%" for t in ordr))
+        yrs = sorted({d[:4] for d in dd})
+        base5 = np.percentile(rr, 5)
+        shifts = []
+        for y in yrs:
+            keep = np.array([d[:4] != y for d in dd])
+            if keep.sum() < 20:
+                continue
+            shifts.append((y, np.percentile(rr[keep], 5) - base5, int((~keep).sum())))
+        shifts.sort(key=lambda t: -abs(t[1]))
+        print(f"      p5 = {base5*100:+.1f}%. Dropping one year moves it most:")
+        for y, d_, cnt in shifts[:4]:
+            print(f"        without {y} (n={cnt} removed): p5 -> {(base5+d_)*100:+.1f}% "
+                  f"({d_*100:+.1f}pp)")
+
+    print("\n8c. MAE is measured on the intraday LOW, which is exactly what a liquidation")
+    print("    engine reads, but a 20-session MAE is a path statistic with heavy overlap:")
+    print("    consecutive signal days in the same crash share almost the whole window.")
+    print("    Episode counts in section 0 are the honest sample size for every MAE")
+    print("    percentile in section 5, not the day counts.")
     print("\nDONE.")
 
 
