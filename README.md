@@ -77,3 +77,8 @@ python3 -m analysis.today --date 2026-09-14 --open 101.74 --high 105.34 \
 ## 数据边界
 
 SOXL 2010-03-11 上市，仓里已是全部历史。更长的半导体序列（SOX 指数、2000 和 2008 两次熊市）本会话拿不到：出口策略只放行 `raw.githubusercontent.com`，Yahoo / Stooq / FRED / Nasdaq / AlphaVantage 均返回 403。把 CSV 放进 `data/` 即可接入。
+
+## 已知问题
+
+- `data/SOXL_OHLC.csv` 中 2026-07-31 的收盘价与 2026-07-30 完全相同（114.720001），而该日内振幅达 12%。上游数据源的问题，暂未修正，用到该日的统计需留意。
+- SOXX 指数数据始于 2018-01-03，2010–2017 无法用它做交叉校验；`holdings_prices_1y.json` 止于 2026-09-11，2026-09-14 那根最极端的 K 线没有对指数校验过。

@@ -31,7 +31,7 @@ def load_soxl() -> pd.DataFrame:
     df["low_at_open"] = (df["open"] - df["low"]).abs() / df["prev_close"] < 0.002
     for h in (1, 3, 5, 10, 20):
         df[f"fwd{h}"] = df["close"].shift(-h) / df["close"] - 1
-        df[f"fwd_min{h}"] = df["low"][::-1].rolling(h, min_periods=1).min()[::-1].shift(-1) / df["close"] - 1
+        df[f"fwd_min{h}"] = df["low"][::-1].rolling(h, min_periods=h).min()[::-1].shift(-1) / df["close"] - 1
     df["hi60"] = df["close"].rolling(60).max()
     df["dd60"] = df["close"] / df["hi60"] - 1
     return df
