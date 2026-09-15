@@ -1,0 +1,35 @@
+# Cross-sectional snapshot, 2026-09-15 around 09:45 ET. Semis leading while the
+# broad tape is soft: index level flat but breadth negative. Recorded because the
+# daily file carries only SOXL and QQQ, and the sector-vs-market split is the whole
+# question this week.
+ticker,pct_change,group
+SOXL,2.35,semis_3x
+QCOM,4.55,semis
+DELL,4.39,hardware
+INTC,2.38,semis
+AMD,2.38,semis
+MRVL,2.17,semis
+NVDA,1.04,semis
+MU,0.55,semis
+AVGO,0.22,semis
+KLAC,-0.26,semis
+LRCX,-0.23,semis
+AMAT,-0.23,semis
+WDC,-2.55,storage
+STX,-4.10,storage
+QQQ,-0.01,index
+NDX,0.01,index
+SPX,-0.10,index
+SPY,-0.12,index
+DJI,-0.51,index
+IWM,-0.68,index
+VIX,-1.11,vol
+GOOGL,-0.96,megacap
+AAPL,-0.83,megacap
+MSFT,-0.18,megacap
+AMZN,-0.28,megacap
+META,1.01,megacap
+ORCL,-1.99,megacap
+NFLX,-2.15,megacap
+XOM,1.31,energy
+CVX,1.33,energy

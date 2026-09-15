@@ -1,0 +1,9 @@
+# Live observations relayed during the 2026-09-15 session (FOMC D-1), US Eastern.
+# Times are approximate - they are when the observation was reported, not a timestamp
+# from the feed. Prices are as read off the user's terminal. Kept separate from the
+# adjusted daily file because these are raw prints, not vendor-adjusted bars.
+time_et,soxl,soxl_high_sofar,soxl_low_sofar,qqq,spx,vix,note
+pre-open,101.50,,,,,,"overnight indication, roughly flat to the 101.13 prior close"
+09:30,104.55,104.55,,,,,"open, a +3.38% gap up against expectations of flat-to-lower"
+~09:45,103.50,105.77,103.50,709.10,7612.72,16.92,"first push to 105.77 then back under the open; QQQ flat, DJI -0.51%, IWM -0.68%"
+~10:00,,105.94,,,,,"retest of the high at 105.94, rejected - no clean breakout"
