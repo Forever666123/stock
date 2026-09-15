@@ -1,0 +1,16 @@
+# 30-day Fed Funds futures settlement prices, snapshot 2026-09-15.
+# Implied average effective rate for the contract month = 100 - price.
+contract,month,price
+ZQU6,2026-09,96.2613
+ZQV6,2026-10,96.1275
+ZQX6,2026-11,96.0175
+ZQZ6,2026-12,95.8925
+ZQF7,2027-01,95.8325
+ZQG7,2027-02,95.7525
+ZQH7,2027-03,95.6775
+ZQJ7,2027-04,95.6025
+ZQK7,2027-05,95.5375
+ZQM7,2027-06,95.4775
+ZQN7,2027-07,95.4525
+ZQQ7,2027-08,95.4225
+ZQU7,2027-09,95.4125
