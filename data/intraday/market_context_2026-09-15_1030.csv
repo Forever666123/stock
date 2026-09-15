@@ -1,0 +1,37 @@
+# Second cross-sectional snapshot, 2026-09-15 around 10:30 ET. Corrects the 09:45
+# read: memory names (MU, SNDK, DRAM, RAM, SKHY) are up, not down. Only the hard
+# disk makers (WDC, STX) remain negative, and those are a different business from
+# the memory-chip complex. Meanwhile the broad tape deteriorated.
+ticker,pct_change,group
+SOXL,4.28,semis_3x
+DELL,5.47,hardware
+ANET,4.34,networking
+QCOM,4.13,semis
+ARM,4.08,semis
+AAOX,4.56,optical
+MRVL,3.41,semis
+AMD,3.23,semis
+AAOI,2.58,optical
+RAM,2.91,memory
+SKHY,2.43,memory
+INTC,2.30,semis
+MU,1.84,memory
+DRAM,1.72,memory
+CSCO,1.35,networking
+TXN,1.39,semis
+NVDA,1.05,semis
+SNDK,0.94,memory
+AMAT,0.13,semis
+KLAC,-0.17,semis
+AVGO,-0.27,semis
+LRCX,-0.80,semis
+WDC,-0.94,hdd
+STX,-3.11,hdd
+KOSPI,-0.85,asia
+GOOGL,-1.28,megacap
+AAPL,-1.07,megacap
+MSFT,-1.17,megacap
+AMZN,-1.19,megacap
+META,0.88,megacap
+ORCL,-2.58,megacap
+NFLX,-3.14,megacap
