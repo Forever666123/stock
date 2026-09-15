@@ -110,6 +110,32 @@ def perm_p(a, b, stat, n=NPERM, seed=RNG_SEED):
     return (hits + 1) / (n + 1)
 
 
+def block_perm_p(a, b, stat, L=21, n=5000, seed=RNG_SEED):
+    """Permutation that shuffles BLOCKS of L consecutive days, not single days.
+
+    Volatility clusters. An iid label shuffle treats 175 days of 2026 as 175
+    independent draws, which they are not: an effective sample closer to
+    175/21 ~ 8 vol-blocks is honest. This keeps within-block clustering intact.
+    """
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    a, b = a[~np.isnan(a)], b[~np.isnan(b)]
+    obs = abs(stat(a, b))
+    pool = np.concatenate([a, b])
+    na, N = len(a), len(pool)
+    nb_blocks = int(np.ceil(N / L))
+    pad = nb_blocks * L - N
+    padded = np.concatenate([pool, pool[:pad]]) if pad else pool
+    blocks = padded.reshape(nb_blocks, L)
+    rng = np.random.default_rng(seed)
+    hits = 0
+    for _ in range(n):
+        order = rng.permutation(nb_blocks)
+        z = blocks[order].ravel()[:N]
+        if abs(stat(z[:na], z[na:])) >= obs - 1e-15:
+            hits += 1
+    return (hits + 1) / (n + 1)
+
+
 def brown_forsythe(a, b):
     """Levene's test with the median (= Brown-Forsythe), F statistic.
 
@@ -242,6 +268,35 @@ def part1(m):
     print("  (if raw KS rejects but standardised KS does not, 2026 differs in SCALE only)")
 
     print("\nBonferroni: 20 tests reported in this block; 5% -> 0.0025 threshold.")
+
+    sec("1c. HONEST p: volatility clusters, so shuffle blocks not days")
+    for L in (5, 21, 63):
+        pb = block_perm_p(a, b, brown_forsythe, L=L, n=5000)
+        print(f"  block length {L:>3}d  Brown-Forsythe block-permutation p = {pb:.4f}"
+              f"   (effective 2026 blocks ~{len(a)//L})")
+    print("  The iid p of 0.0000 above is not credible; these are.")
+
+    sec("1d. ADVERSARIAL: is 2026 new, or is it just 2020/2022 again?")
+    print("If 2026 merely repeats the worst years already in the sample, then the")
+    print("problem is not that history fails to transfer - it is that the AVERAGE of")
+    print("history was the wrong summary all along, and a vol-conditioned subsample")
+    print("would transfer fine. That is a different, cheaper fix. Test it.")
+    print(f"\n{'comparison':<26}{'volA':>9}{'volB':>9}{'ratio':>8}{'BF F':>8}"
+          f"{'iid p':>9}{'block21 p':>11}")
+    for nm, yr in (("2026 vs 2022", 2022), ("2026 vs 2020", 2020), ("2026 vs 2025", 2025),
+                   ("2026 vs 2024", 2024)):
+        z = m[m.index.year == yr]["ret"].dropna().values
+        print(f"{nm:<26}{ann(a)*100:>8.1f}%{ann(z)*100:>8.1f}%{ann(a)/ann(z):>8.2f}"
+              f"{brown_forsythe(a,z):>8.1f}{perm_p(a,z,brown_forsythe,n=5000):>9.4f}"
+              f"{block_perm_p(a,z,brown_forsythe,L=21,n=5000):>11.4f}")
+    hv = m[(m.index.year.isin([2020, 2022])) & (m.index < "2026-01-01")]["ret"].dropna().values
+    print(f"{'2026 vs 2020+2022 pooled':<26}{ann(a)*100:>8.1f}%{ann(hv)*100:>8.1f}%"
+          f"{ann(a)/ann(hv):>8.2f}{brown_forsythe(a,hv):>8.1f}"
+          f"{perm_p(a,hv,brown_forsythe,n=5000):>9.4f}"
+          f"{block_perm_p(a,hv,brown_forsythe,L=21,n=5000):>11.4f}")
+    print(f"\nKS 2026 vs 2020+2022 pooled, raw returns: D={ks_stat(a,hv):.4f} "
+          f"iid p={perm_p(a,hv,ks_stat,n=5000):.4f} "
+          f"block21 p={block_perm_p(a,hv,ks_stat,L=21,n=5000):.4f}")
     return cur, old
 
 
@@ -347,6 +402,25 @@ def part3(m):
     print("\nIf SOXL vol rose by MORE than 3x the SOXX rise, the extra is fund-specific.")
     print(f"  SOXX vol rise {ann(xn)/ann(xo):.2f}x  vs  SOXL vol rise {ann(yn)/ann(yo):.2f}x")
 
+    print("\nRolling 60-day SOXL-on-SOXX beta - has tracking drifted late in 2026?")
+    br = []
+    for i in range(60, len(sx) + 1):
+        xx, yy = sx.values[i-60:i], sl2.values[i-60:i]
+        br.append((sx.index[i-1], np.polyfit(xx, yy, 1)[0]))
+    br = pd.Series(dict(br))
+    print(f"  full range of rolling beta: min {br.min():.3f} ({br.idxmin().date()})  "
+          f"max {br.max():.3f} ({br.idxmax().date()})")
+    for d in ("2026-01-30", "2026-03-31", "2026-05-29", "2026-06-30", "2026-07-31",
+              "2026-08-31"):
+        sl_ = br[br.index <= d]
+        if len(sl_):
+            print(f"  {d}: {sl_.iloc[-1]:.3f}")
+    print(f"  last available ({br.index[-1].date()}): {br.iloc[-1]:.3f}")
+    print(f"\n  2026-09-14 is NOT covered by SOXX data (JSON ends 2026-09-11).")
+    print(f"  SOXL -16.98% that day implies SOXX about {-0.1698/2.93*100:.2f}% if the")
+    print(f"  3x relation held; QQQ was only -0.41%, so it was a chip-specific day.")
+    print(f"  This cannot be verified here and is flagged as an open hole.")
+
 
 # ---------------------------------------------------------------- 4. base rates
 
@@ -450,6 +524,55 @@ def part4(m):
             f"{(lr<=-t).mean()*100:>7.1f}%" for t in (.05, .10, .12, .15, .20)))
 
 
+def part4f(m):
+    sec("4f. THE HONEST FIX: condition on volatility instead of on the calendar")
+    print("Conditioner: trailing 20-day MEDIAN high-low range, computed from bars up")
+    print("to YESTERDAY only -> known before today's open, so it is a legal trigger.")
+    m = m.copy()
+    m["rv20"] = m["range"].rolling(20).median().shift(1)
+    cur = m["rv20"].iloc[-1]
+    print(f"  current value (as of the 2026-09-15 open): {pct(cur)}")
+    hi = m[m["rv20"] >= .06]
+    hi_old = hi[hi.index < "2024-01-01"]
+    print(f"  days with rv20 >= 6.0%: n={len(hi)} total, of which "
+          f"{len(hi_old)} are before 2024 -> the conditioned sample is NOT just 2026")
+    print(f"  year spread of that sample: "
+          f"{dict(sorted(pd.Series(hi.index.year).value_counts().items()))}")
+
+    print(f"\n{'base rate':<30}{'full history':>16}{'2024-2026':>14}{'rv20>=6%':>14}"
+          f"{'2026 only':>12}")
+    groups = [("full history", m), ("2024-2026", m[m.index >= "2024-01-01"]),
+              ("rv20>=6%", hi), ("2026 only", m[m.index >= "2026-01-01"])]
+
+    def row(label, f):
+        print(f"{label:<30}" + "".join(f"{f(g):>16}" if i == 0 else f"{f(g):>14}"
+                                       for i, (_, g) in enumerate(groups[:3]))
+              + f"{f(groups[3][1]):>12}")
+    row("n", lambda g: str(len(g)))
+    row("next-day up rate", lambda g: f"{g['fwd1'].dropna().gt(0).mean()*100:.1f}%")
+    row("next-day median ret", lambda g: pct(g['fwd1'].median()))
+    row("fwd_min20 MEDIAN (sizing)", lambda g: pct(g['fwd_min20'].median()))
+    row("fwd_min20 p10", lambda g: pct(g['fwd_min20'].quantile(.10)))
+    row("fwd20 median", lambda g: pct(g['fwd20'].median()))
+    row("fwd20 up rate", lambda g: f"{g['fwd20'].dropna().gt(0).mean()*100:.1f}%")
+    row("P(day low <= -10% vs prevcl)", lambda g: f"{(g['low_ret']<=-.10).mean()*100:.1f}%")
+    row("P(day low <= -12% vs prevcl)", lambda g: f"{(g['low_ret']<=-.12).mean()*100:.1f}%")
+
+    lo = m[m["rv20"] < .06]
+    a = hi["fwd_min20"].dropna().values
+    b = lo["fwd_min20"].dropna().values
+    print(f"\nfwd_min20 median: rv20>=6% {pct(np.median(a))} vs rv20<6% {pct(np.median(b))}")
+    print(f"  iid perm p = {perm_p(a, b, lambda x, y: np.median(x)-np.median(y), n=5000):.4f}")
+    print(f"  block(21) perm p = "
+          f"{block_perm_p(a, b, lambda x, y: np.median(x)-np.median(y), L=21, n=3000):.4f}")
+    print(f"  overlapping 20-day windows: independent blocks ~{len(a)//20} vs {len(b)//20}")
+    print(f"\nnext-day up rate: rv20>=6% "
+          f"{hi['fwd1'].dropna().gt(0).mean()*100:.1f}% (n={hi['fwd1'].notna().sum()}) vs "
+          f"rv20<6% {lo['fwd1'].dropna().gt(0).mean()*100:.1f}% (n={lo['fwd1'].notna().sum()})")
+    print(f"  iid perm p = "
+          f"{perm_p(hi['fwd1'].dropna().gt(0), lo['fwd1'].dropna().gt(0), lambda x,y: x.mean()-y.mean(), n=5000):.4f}")
+
+
 # ---------------------------------------------------------------- 5. speed
 
 
@@ -530,6 +653,7 @@ def main():
     part2(m)
     part3(m)
     part4(m)
+    part4f(m)
     part5(m)
 
 

@@ -217,8 +217,10 @@ def block_boot_mean(x: np.ndarray, L=BLOCK, nboot=NBOOT, rng=RNG):
 RESULTS = []      # (id, short, n, raw_p, direction_claimed)
 
 
-def record(cid, short, n, p, note=""):
-    RESULTS.append(dict(id=cid, short=short, n=n, p=p, note=note))
+def record(cid, short, n, p, p_oos=np.nan, note=""):
+    """p = the raw p-value AS CLAIMED (in-sample, the number quoted to the user).
+    p_oos = the same test after adding the three verified 2026 meetings."""
+    RESULTS.append(dict(id=cid, short=short, n=n, p=p, p_oos=p_oos, note=note))
     return p
 
 
@@ -359,7 +361,7 @@ def main():
           f"{abs((a>0).mean()-(b>0).mean())*len(a):.1f} extra up days")
     print(f"  A mean difference that three new observations can reverse is not an estimate of")
     print(f"  anything; it is the sample mean of a fat-tailed series.")
-    record(1, "FOMC D-1 drift", len(a), p1)
+    record(1, "FOMC D-1 drift", len(res1["IN-SAMPLE 2015-2025"][3]), p_in, p1)
     store[1] = ("mean diff", x, dm1_flag, None)
 
     # ---------------------------------------------------------------- CLAIM 2
@@ -388,7 +390,7 @@ def main():
         kk = sum(1 for _, v in sel if v > 0)
         print(f"    cycle {a_[:7]}..{b_[:7]}: D-1 up {kk}/{len(sel)}")
     print(f"    With only 2 independent cycles, the effective n for a regime-level claim is 2.")
-    record(2, "hike D-1 up 14/20", n2, p2)
+    record(2, "hike D-1 up 14/20", n2, p2, np.nan)
 
     # ---------------------------------------------------------------- CLAIM 3
     hdr("CLAIM 3  Sector-only decline (SOXL <= -8%, QQQ > -2%) underperforms over 3 days")
@@ -423,7 +425,7 @@ def main():
     print(f"  NOTE the original claim rested on MEDIAN and UP-RATE, not mean; the mean never")
     print(f"  supported it.  Medians: sector-only {alone['fwd3'].median():+.2%} vs joint "
           f"{joint['fwd3'].median():+.2%}.")
-    record(3, "sector-only 3d underperf", len(alone), p3)
+    record(3, "sector-only 3d underperf", len(al3), p3, p3b)
     store[3] = ("mean diff", big["fwd3"].values, g3, big.index)
 
     # ---------------------------------------------------------------- CLAIM 4
@@ -478,8 +480,11 @@ def main():
     obs4c, p4c = perm_diff(bigd["fwd5"].values, bigd["dm2"].values)
     print(f"  the same filter at 3d: diff {obs4b:+.2%} p={p4b:.3f};  at 7d: diff {obs4c:+.2%} p={p4c:.3f}")
     print(f"  -> even in-sample the effect lives at one horizon; out of sample it is negative.")
-    record(4, "6% drop on D-2 -> +8.3%", len(ad), p4)
-    store[4] = ("mean diff", bigd["fwd2"].values, bigd["dm2"].values, bigd.index)
+    record(4, "6% drop on D-2 -> +8.3%", len(ad_in),
+           res4["IN-SAMPLE 2015-2025"][1], p4)
+    bg_in = res4["IN-SAMPLE 2015-2025"][2]
+    store[4] = ("mean diff", bg_in["fwd2"].values, bg_in["dm2"].values, bg_in.index)
+    store["4x"] = ("mean diff", bigd["fwd2"].values, bigd["dm2"].values, bigd.index)
 
     # ---------------------------------------------------------------- CLAIM 5
     hdr("CLAIM 5  Breaking a prior low carries no information in either direction")
@@ -506,7 +511,7 @@ def main():
                                       near[['fwd20']].assign(g=False)])["fwd20"].values,
                            np.r_[np.ones(len(kept5), bool), np.zeros(len(near), bool)])
     print(f"  after dropping it: difference {obs5b:+.2%}  p = {p5b:.3f}")
-    record(5, "prior low is uninformative (NULL)", len(broke), p5)
+    record(5, "prior low is uninformative (NULL)", len(broke), p5, np.nan)
     store[5] = ("mean diff", both["fwd20"].values, both["g"].values, both.index)
 
     # ---------------------------------------------------------------- CLAIM 6
@@ -554,6 +559,17 @@ def main():
             p6_list.append((pname, S, d.mean(), pv, len(ii), d))
     worst = min(p6_list, key=lambda r: r[3])
     best_for_stop = max(p6_list, key=lambda r: r[2])
+    print(f"\n  THE MEDIAN DIFFERENCE IS 0.00% IN EVERY CELL, AND THAT IS NOT A NULL RESULT:")
+    print(f"  on most paths the stop never triggers, so the difference is exactly zero by")
+    print(f"  construction.  The honest statistic is conditional on the stop being hit:")
+    print(f"  {'population':<18}{'stop':>8}{'n hit':>7}{'mean d|hit':>12}{'median d|hit':>14}{'d|hit > 0':>11}")
+    for pname, S, dm_, pv_, nn_, d_ in p6_list:
+        hitmask = d_ != 0
+        if hitmask.sum() == 0:
+            continue
+        dh = d_[hitmask]
+        print(f"  {pname:<18}{'-'+format(S*100,'.0f')+'%':>8}{int(hitmask.sum()):>7}"
+              f"{dh.mean():>12.2%}{np.median(dh):>14.2%}{(dh > 0).mean():>11.0%}")
     print(f"\n  sign check: stop EV minus hold EV is negative in "
           f"{sum(1 for r in p6_list if r[2] < 0)}/{len(p6_list)} cells.")
     print(f"  the least-bad cell for a stop: {best_for_stop[0]} at -{best_for_stop[1]*100:.0f}% "
@@ -564,7 +580,7 @@ def main():
     print(f"  NOTE: those 18 cells are themselves 18 of the ~100 tests.  The claim is not")
     print(f"  'one cell is significant', it is 'the SIGN is the same in every cell', which is")
     print(f"  a much stronger and multiplicity-proof statement.")
-    record(6, "stops are EV-negative", worst[4], p6)
+    record(6, "stops are EV-negative", worst[4], p6, np.nan)
     store[6] = ("paired", worst[5], None, None)
 
     # ---------------------------------------------------------------- CLAIM 7
@@ -609,6 +625,13 @@ def main():
             p7_list.append((pname, off, d.mean(), pv, len(ii), d))
     c7 = [r for r in p7_list if abs(r[1] + 0.02) < 1e-9]
     p7 = min(r[3] for r in c7)
+    print(f"\n  *** MEAN AND MEDIAN DISAGREE IN EVERY SINGLE CELL ***")
+    print(f"  'A-mkt' is negative in 8/9 cells but 'med A-mkt' is POSITIVE in 9/9.  The limit")
+    print(f"  tranche beats buying at market on MORE THAN HALF the paths and loses on the")
+    print(f"  average because the paths it misses are the largest up-moves.  Stating the claim")
+    print(f"  as 'a limit inside the range is worse' is true only of the mean, and the rules of")
+    print(f"  evidence for this project require the median beside it.  The decision-relevant")
+    print(f"  form is: a shallow limit trades a small, frequent gain for a rare, large miss.")
     print(f"\n  the -2% tranche is worse than market in "
           f"{sum(1 for r in c7 if r[2] < 0)}/{len(c7)} populations; smallest raw p = {p7:.4f}")
     deeper = [r for r in p7_list if r[1] <= -0.05]
@@ -618,7 +641,7 @@ def main():
     print(f"  the mean, which means what is being measured is upward drift, not adverse")
     print(f"  selection.  The claim as stated is therefore mis-attributed to its mechanism.")
     worst7 = min(c7, key=lambda r: r[3])
-    record(7, "-2% limit worse than market", worst7[4], p7)
+    record(7, "-2% limit worse than market", worst7[4], p7, np.nan)
     store[7] = ("paired", worst7[5], None, None)
 
     # ---------------------------------------------------------------- CLAIM 8
@@ -673,19 +696,22 @@ def main():
     hd_in = mt2[(mt2['action'] == 0) & ~mt2['oos']]['fwd20'].dropna()
     print(f"  holds excluding 2026: n={len(hd_in)} mean {hd_in.mean():+.2%} "
           f"-> the quoted +6.5%/62% figure is the in-sample one.")
-    record(8, "post-hike 20d drift negative", len(hk), p8)
+    record(8, "post-hike 20d drift negative", len(hk), p8, p8b)
     store[8] = ("mean diff", both8["y"].values, both8["g"].values, both8.index)
 
     # ---------------------------------------------------------------- multiplicity
     hdr("MULTIPLE-TESTING CORRECTION  (M = 100 tests run this session)")
     ps = [r["p"] for r in RESULTS]
     qg, qu = bh_table(ps)
-    print(f"{'#':<3}{'claim':<34}{'n':>5}{'raw p':>9}{'Bonf p':>9}{'surv B':>8}"
-          f"{'BH q gen':>10}{'BH q unif':>11}{'surv BH':>9}")
+    print("raw p is the test AS CLAIMED (in-sample).  'OOS p' repeats it after adding the")
+    print("three verified 2026 meetings / excluding 2026 where the claim is not FOMC-based.")
+    print(f"\n{'#':<3}{'claim':<34}{'n':>5}{'raw p':>9}{'Bonf p':>9}{'surv B':>8}"
+          f"{'BH q gen':>10}{'BH q unif':>11}{'surv BH':>9}{'OOS p':>9}")
     for r, g_, u_ in zip(RESULTS, qg, qu):
         bp = bonf(r["p"])
+        oo = f"{r['p_oos']:.3f}" if r["p_oos"] == r["p_oos"] else "  n/a"
         print(f"{r['id']:<3}{r['short']:<34}{r['n']:>5}{r['p']:>9.4f}{bp:>9.3f}"
-              f"{str(bp < ALPHA):>8}{g_:>10.3f}{u_:>11.3f}{str(u_ < ALPHA):>9}")
+              f"{str(bp < ALPHA):>8}{g_:>10.3f}{u_:>11.3f}{str(u_ < ALPHA):>9}{oo:>9}")
     print(f"\n  Bonferroni threshold on raw p: {ALPHA/M_TESTS:.5f}")
     print(f"  Expected false positives at alpha=0.05 with M=100 under a complete null: 5.0")
     print(f"  Number of these 8 with raw p < 0.05: {sum(1 for p in ps if p < 0.05)}")
@@ -699,7 +725,7 @@ def main():
     print(f"\n{'#':<3}{'claim':<34}{'point est':>12}{'boot mean':>12}{'95% CI low':>13}"
           f"{'95% CI high':>13}{'excl 0':>8}")
     boot_out = {}
-    for cid in sorted(store):
+    for cid in [1, 3, 4, "4x", 5, 6, 7, 8]:
         kind, xa, ga, _ = store[cid]
         if kind == "mean diff":
             x = np.asarray(xa, float)
@@ -714,8 +740,9 @@ def main():
             bm = np.nan
         excl = (lo_ > 0) or (hi_ < 0)
         boot_out[cid] = (pt, lo_, hi_, excl)
-        short = next(r["short"] for r in RESULTS if r["id"] == cid)
-        print(f"{cid:<3}{short:<34}{pt:>12.2%}{(bm if bm==bm else np.nan):>12.2%}"
+        short = ("  same, +2026 OOS" if cid == "4x"
+                 else next(r["short"] for r in RESULTS if r["id"] == cid))
+        print(f"{str(cid):<3}{short:<34}{pt:>12.2%}{(bm if bm==bm else np.nan):>12.2%}"
               f"{lo_:>13.2%}{hi_:>13.2%}{str(excl):>8}")
     print("\n  Claims 2 is a proportion, not a mean difference; its interval is the binomial")
     print("  one and is shown in its own section above (14/20, two-sided p reported there).")
@@ -738,57 +765,104 @@ def main():
     print("          depends on a regime / a handful of observations.")
     print("noise   = cannot be distinguished from the ~5 false positives a 100-test search")
     print("          produces by construction.  Do not act on it.")
+    P = {r["id"]: r for r in RESULTS}
+    B = boot_out
     verdicts = [
         (1, "noise",
-         "raw p ~ {p1:.2f} before any correction.  A 0.13 pp difference against a 4% daily "
-         "sd is 0.03 sd.  Up-rate difference is one extra up day out of 87.  Nothing survives."),
+         f"in-sample p={P[1]['p']:.2f} BEFORE any correction -- it was never significant even "
+         f"once. Effect is +0.021 sd of a 6.2% daily sd. Adding the 3 verified 2026 meetings "
+         f"flips the sign to {P[1]['p_oos']:.2f}/negative. Bootstrap CI "
+         f"[{B[1][1]:+.1%},{B[1][2]:+.1%}] spans 0. Up-rate gap is under one day in 87."),
         (2, "noise",
-         "n=20, two-sided binomial p reported above.  The 'hike' subset was chosen after the "
-         "full-sample version failed.  13 of the 20 come from one cycle.  Counter-example only."),
+         f"n=20, two-sided binomial p={P[2]['p']:.2f}. Subset chosen after the full-sample "
+         f"version failed -- textbook subgroup search. 11 of 20 come from 2022-23; only 2 "
+         f"independent hiking cycles exist, so effective n is 2. No out-of-sample rows exist "
+         f"because there are no 2026 hikes. Counter-example only."),
         (3, "fragile",
-         "Direction (medians and up-rate) is stable and has a stated mechanism, but the mean "
-         "never supported it, 2026 supplies a large share of the sample, and the CI spans 0."),
+         f"Mean difference p={P[3]['p']:.2f}, bootstrap CI [{B[3][1]:+.1%},{B[3][2]:+.1%}] "
+         f"spans 0, and the mean never supported the claim in the first place. What is stable "
+         f"is the MEDIAN (-2.4% vs +0.6%) and the up-rate (45% vs 50%), unchanged when 2026 is "
+         f"removed. Direction usable as a reason not to add; magnitude is not estimable."),
         (4, "noise",
-         "n=9, two filters conjoined because today matches both, no mechanism for the second, "
-         "and the effect vanishes one horizon later.  This is the definition of data mining."),
+         f"The one claim that was nominally significant: in-sample p={P[4]['p']:.3f}. It dies "
+         f"two separate ways. Bonferroni {bonf(P[4]['p']):.2f}; BH q={qu[3]:.2f}; and the single "
+         f"out-of-sample draw "
+         f"(2026-07-27, -28.2%) was the worst of the ten and cut the mean from +8.3% to +4.7% "
+         f"with p going {P[4]['p']:.3f}->{P[4]['p_oos']:.2f}. NOTE the block bootstrap does NOT "
+         f"kill it in-sample: CI [{B[4][1]:+.1%},{B[4][2]:+.1%}] excludes 0. That is a warning "
+         f"about the bootstrap, not a rescue of the claim -- resampling blocks from a 4150-day "
+         f"series with a 9-member event group mostly re-reports the point estimate. Adding the "
+         f"OOS row widens it to [{B['4x'][1]:+.1%},{B['4x'][2]:+.1%}], which does span 0. "
+         f"n=9, two conjoined filters, one with no mechanism, effect at one horizon only."),
         (5, "robust",
-         "As a NULL it is safe: nothing was found and nothing needs multiplicity protection. "
-         "State it as 'no detectable edge at n=' rather than 'no information'."),
+         f"Safe as a NULL: p={P[5]['p']:.2f}, and the +4.8% point estimate is entirely one "
+         f"observation (2026-03-30, +169.7%); dropping it leaves +0.4%, p=0.94. But the "
+         f"bootstrap CI is [{B[5][1]:+.1%},{B[5][2]:+.1%}] -- enormous. Say 'no DETECTABLE "
+         f"edge at n=37 episodes', not 'no information'."),
         (6, "robust",
-         "Arithmetic, not statistical: a stop truncates the right tail of a series with no "
-         "20-day momentum continuation.  Same sign in every cell tested."),
+         f"The only claim that survives Bonferroni AND BH AND the block bootstrap "
+         f"(CI [{B[6][1]:+.1%},{B[6][2]:+.1%}]). It survives because it is arithmetic: a stop "
+         f"truncates the right tail of a series with no 20-day momentum continuation. Sign is "
+         f"negative in 18/18 cells, and conditional on the stop firing, mean AND median are "
+         f"both negative in 18/18 with the stop right only 38-46% of the time."),
         (7, "fragile",
-         "True as a number but mis-attributed: every limit offset loses to market, so what is "
-         "measured is upward drift, not adverse selection specific to 'inside the range'."),
+         f"Survives every correction on the MEAN (CI [{B[7][1]:+.1%},{B[7][2]:+.1%}]) but the "
+         f"MEDIAN difference is positive in 9/9 cells -- the limit beats market on most paths "
+         f"and loses on the average. Also, every offset tested (-2/-5/-10%) loses on the mean, "
+         f"so what is measured is upward drift plus missed up-gaps, not something special "
+         f"about being 'inside the range'. The mechanism as stated is mis-attributed."),
         (8, "fragile",
-         "Direction has a real mechanism, but year-demeaning removes most of the gap.  The raw "
-         "-2.9% vs +6.5% is largely 'hikes happened in 2022'."),
+         f"p={P[8]['p']:.2f} raw, bootstrap CI [{B[8][1]:+.1%},{B[8][2]:+.1%}] spans 0. "
+         f"Year-demeaning shrinks the gap from -10.4% to -4.5% (p={P[8]['p_oos']:.2f}): 57% of "
+         f"it is the calendar, not the meeting. And the 3 out-of-sample HOLDS returned "
+         f"+90%,-42%,+27% -- a spread that makes the +6.5% hold mean meaningless."),
     ]
-    print(f"\n{'#':<3}{'claim':<34}{'verdict':<10}why")
+    import textwrap
+    counts = {}
     for cid, v, why in verdicts:
+        counts[v] = counts.get(v, 0) + 1
         short = next(r["short"] for r in RESULTS if r["id"] == cid)
-        why = why.format(p1=ps[0])
-        print(f"{cid:<3}{short:<34}{v:<10}{why[:60]}")
-        rest = why[60:]
-        while rest:
-            print(f"{'':<47}{rest[:60]}")
-            rest = rest[60:]
+        print(f"\n  [{v.upper()}]  claim {cid}: {short}")
+        for ln in textwrap.wrap(why, 96):
+            print(f"      {ln}")
+    print(f"\n  tally: " + ", ".join(f"{k} {v}" for k, v in
+                                     sorted(counts.items(), key=lambda kv: -kv[1])))
 
     hdr("THE DELIVERABLE: WHAT SHOULD NOT BE RELIED ON")
-    print("  1. Do not size anything off claim 4 (the 6%-decline-on-D-2 +8.3%).  It is the")
-    print("     most-searched number in the session and it is n=9.")
-    print("  2. Do not use claim 1 or claim 2 as a reason to be long into 2026-09-16.  The")
-    print("     pre-FOMC drift is not measurable in this instrument at this sample size.")
-    print("  3. Do not use claim 8's magnitude.  A hike is 92.3% priced; what is priced is")
-    print("     not what the 2022 sample measured, which was a repricing of the whole path.")
-    print("  4. Claim 3's direction may be used as a reason NOT to add, never as a size.")
-    print("  5. Claims 5, 6, 7 are the only ones that should touch the plan, and all three")
-    print("     are constraints (no stop, no shallow tranche, no prior-low trigger), not")
-    print("     entry signals.  Constraints are what survives a multiplicity audit, because")
-    print("     they rest on arithmetic rather than on a subset mean.")
-    print("\n  Net: of the 8 claims, 0 are robust findings ABOUT THE FUTURE.  The 3 marked")
-    print("  robust/fragile-but-usable are all statements about the arithmetic of position")
-    print("  management, which is exactly the class of claim a 100-test search cannot fake.")
+    print("  1. Claim 4 (6% decline on D-2 -> +8.3% into the decision).  Do not size anything")
+    print("     off it.  It is the most-searched number in the session, n=9, no mechanism for")
+    print("     the D-2 filter, dead at every other horizon, Bonferroni p=1.00, BH q=0.48, and")
+    print("     the single observation that arrived after it was found returned -28.2%.")
+    print("  2. Claims 1 and 2 (pre-FOMC D-1 drift, hike D-1 up 14/20).  Not a reason to be")
+    print("     long into 2026-09-16.  Claim 1 was never significant (p=0.84) and its sign")
+    print("     reverses on three new observations.  Claim 2 is n=20 across 2 cycles, p=0.18.")
+    print("  3. Claim 8's magnitude (-2.9% vs +6.5%).  57% of the gap is the calendar.  The")
+    print("     three out-of-sample holds returned +90%, -42%, +27%: the hold mean is not an")
+    print("     estimate of anything.  A hike is 92.3% priced, so the 2022 sample is measuring")
+    print("     a repricing that has already happened here.")
+    print("  4. Claim 3's MEAN.  The median and up-rate are stable and may argue against")
+    print("     adding; the mean never supported the claim and the CI spans zero.")
+    print("  5. Claim 7 as stated.  The -2% tranche is worse on the mean and BETTER on the")
+    print("     median, and every offset tested loses on the mean, so it is not evidence about")
+    print("     'inside the range' -- it is drift plus missed up-gaps.  Usable conclusion: a")
+    print("     shallow tranche swaps a small frequent gain for a rare large miss.")
+    print("  6. Claim 5 should be restated.  'No information' overclaims; the interval is")
+    print("     [-5.9%, +31.5%] over 20 days.  'No detectable edge at 37 episodes' is correct,")
+    print("     and it supports the same decision: do not trigger on a prior low.")
+    print()
+    print("  WHAT SURVIVES: claim 6 only, and it survives because it is arithmetic rather than")
+    print("  a subset mean.  Of the 8 claims, ZERO are robust findings about FUTURE RETURNS.")
+    print("  The two ranked robust are a null and an identity.  Everything that pointed at a")
+    print("  direction -- 1, 2, 3, 4, 8 -- is consistent with the ~5 false positives that a")
+    print("  100-test search over one price series produces by construction.")
+    print()
+    print("  IMPLICATION FOR THE PLAN AS WRITTEN (limits at 96 and 92, no stop, ~20 days):")
+    print("  the audit neither supports nor refutes the levels -- no claim here is about where")
+    print("  to place them.  It supports only the two structural choices: no price stop")
+    print("  (claim 6, the sole survivor) and tranches placed well outside the daily range")
+    print("  (claim 7's usable half; 96 is -5.1% and 92 is -9.0% against a 6.0% median range).")
+    print("  The reasons given for the TIMING -- FOMC D-1 drift, the D-2 selloff analogue --")
+    print("  did not survive and should be removed from the rationale entirely.")
     print()
 
 
