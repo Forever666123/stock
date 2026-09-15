@@ -68,6 +68,8 @@ def main():
     ap.add_argument("--role", choices=["dm2", "dm1", "d0", "none"], default="dm1")
     ap.add_argument("--prev-ret", type=float, default=None,
                     help="prior session return, to also cut on 'after a big drop'")
+    ap.add_argument("--open", type=float, default=None, dest="open_px",
+                    help="the actual open, once known; levels are then measured from it")
     a = ap.parse_args()
     m, roles = build()
     P = a.prev_close
@@ -105,6 +107,47 @@ def main():
         print()
     print("爆仓按盘中最低触发，和券商强平同一个机制。过夜是杠杆代价的来源：")
     print("同样的杠杆，当日了结和持有五天的爆仓概率差一个数量级。\n")
+
+    # ---- levels measured from the open ---------------------------------
+    # The gap carries almost no information about how much further price falls
+    # after the open (correlation about -0.2 on FOMC D-1 and 0.0 elsewhere), so
+    # the open is treated as a free anchor and everything is measured from it.
+    m["l_o"] = m["low"] / m["open"] - 1
+    m["h_o"] = m["high"] / m["open"] - 1
+    pops = []
+    if a.role != "none":
+        pops.append((f"FOMC {a.role.upper().replace('DM','D−')}",
+                     m[m.index.isin(roles[a.role])].dropna(subset=["l_o"])))
+    if a.prev_ret is not None and a.prev_ret <= -0.10:
+        pops.append(("大跌次日",
+                     m[(m["ret"].shift(1) <= -0.13) | (m["gap"].shift(1) <= -0.12)].dropna(subset=["l_o"])))
+    if not pops:
+        return
+    print("## 从开盘价往下量（跳空幅度对此几乎没有预测力，所以以开盘为锚）\n")
+    print("| 母体 | n | 中位低 | 25%低 | 10%低 | 5%低 | 中位高 | 75%高 |")
+    print("|---|---|---|---|---|---|---|---|")
+    lows, highs = {}, {}
+    for nm, s_ in pops:
+        lo = {p: np.percentile(s_["l_o"], p) for p in (50, 25, 10, 5)}
+        hi = {p: np.percentile(s_["h_o"], p) for p in (50, 75)}
+        lows[nm], highs[nm] = lo, hi
+        print(f"| {nm} | {len(s_)} | " + " | ".join(f"{lo[p]*100:+.1f}%" for p in (50, 25, 10, 5))
+              + f" | {hi[50]*100:+.1f}% | {hi[75]*100:+.1f}% |")
+    if len(pops) > 1:
+        mix_l = {p: float(np.mean([lows[n][p] for n in lows])) for p in (50, 25, 10, 5)}
+        mix_h = {p: float(np.mean([highs[n][p] for n in highs])) for p in (50, 75)}
+        print(f"| **混合** | — | " + " | ".join(f"{mix_l[p]*100:+.1f}%" for p in (50, 25, 10, 5))
+              + f" | {mix_h[50]*100:+.1f}% | {mix_h[75]*100:+.1f}% |")
+    else:
+        mix_l, mix_h = lows[pops[0][0]], highs[pops[0][0]]
+    print()
+    opens = [a.open_px] if a.open_px else [round(P * (1 + g / 100)) for g in range(3, -8, -1)]
+    print("| 开盘价 | 一档(中位低) | 二档(25%) | 深档(10%) | 极限(5%) | 中位高 | 75%高 |")
+    print("|---|---|---|---|---|---|---|")
+    for o in opens:
+        print(f"| {o:g} | " + " | ".join(f"{o*(1+mix_l[p]):.1f}" for p in (50, 25, 10, 5))
+              + f" | {o*(1+mix_h[50]):.1f} | {o*(1+mix_h[75]):.1f} |")
+    print("\n一档 = 一半的交易日会摸到；二档 = 四次里一次；深档 = 十次里一次；极限 = 二十次里一次。\n")
 
 
 if __name__ == "__main__":

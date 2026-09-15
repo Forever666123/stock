@@ -394,10 +394,8 @@ def part3(m):
     print(f"\ndaily regression slope SOXL on SOXX (should be ~3.00 by construction):")
     print(f"  2018-2025 beta={beta(xo,yo):.3f}  R2={np.corrcoef(xo,yo)[0,1]**2:.4f}")
     print(f"  2026      beta={beta(xn,yn):.3f}  R2={np.corrcoef(xn,yn)[0,1]**2:.4f}")
-    print(f"  perm p on beta difference = "
-          f"{perm_p(np.arange(len(xn)),np.arange(len(xo)),lambda i,j: 0.0, n=1):>.0f} (n/a - see note)")
-    print("  NOTE: beta is a paired statistic, so the label-shuffle permutation above is")
-    print("        meaningless and is not reported as evidence. Read the two betas directly.")
+    print("  NOTE: beta is a paired statistic; a label-shuffle permutation on it is")
+    print("        meaningless, so no p-value is claimed. Read the two betas directly.")
 
     print("\nIf SOXL vol rose by MORE than 3x the SOXX rise, the extra is fund-specific.")
     print(f"  SOXX vol rise {ann(xn)/ann(xo):.2f}x  vs  SOXL vol rise {ann(yn)/ann(yo):.2f}x")
